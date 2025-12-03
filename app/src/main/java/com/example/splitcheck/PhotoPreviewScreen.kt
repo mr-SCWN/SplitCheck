@@ -26,6 +26,10 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
     var ocrText by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
 
+    // State for edit dialog
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editableText by remember { mutableStateOf("") }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -34,10 +38,7 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
     ) {
 
         item {
-            Text(
-                "Receipt Preview",
-                style = MaterialTheme.typography.headlineMedium
-            )
+            Text("Receipt Preview", style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.height(20.dp))
         }
 
@@ -55,36 +56,44 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
             Spacer(Modifier.height(20.dp))
         }
 
+        // Scan button
         item {
             Button(onClick = {
                 if (uri != null) {
                     loading = true
                     coroutine.launch {
-                        ocrText = ReceiptTextRecognizer.recognizeTextFromUri(
-                            context,
-                            Uri.parse(uri)
-                        )
+                        ocrText = ReceiptTextRecognizer.recognizeTextFromUri(context, Uri.parse(uri))
+                        editableText = ocrText
                         loading = false
                     }
                 }
-            }) {
-                Text("Scan Receipt")
-            }
+            }) { Text("Scan Receipt") }
         }
 
         if (loading) {
             item { Text("Processing…") }
         }
 
+        // EDIT TEXT button
         if (ocrText.isNotBlank()) {
             item {
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(15.dp))
+
+                Button(onClick = {
+                    editableText = ocrText
+                    showEditDialog = true
+                }) {
+                    Text("Edit text")
+                }
+
+                Spacer(Modifier.height(10.dp))
+
                 Text("Extracted text:", style = MaterialTheme.typography.titleMedium)
                 Text(ocrText)
             }
         }
 
-        item { Spacer(Modifier.height(20.dp)) }
+        item { Spacer(Modifier.height(25.dp)) }
 
         // People selector
         item {
@@ -121,5 +130,38 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
                 Text("Continue")
             }
         }
+    }
+
+    // EDIT TEXT DIALOG
+    if (showEditDialog) {
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Edit extracted text") },
+
+            text = {
+                OutlinedTextField(
+                    value = editableText,
+                    onValueChange = { editableText = it },
+                    modifier = Modifier.fillMaxWidth().height(250.dp)
+                )
+            },
+
+            confirmButton = {
+                Button(onClick = {
+                    ocrText = editableText
+                    showEditDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+
+            dismissButton = {
+                Button(onClick = {
+                    showEditDialog = false
+                }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

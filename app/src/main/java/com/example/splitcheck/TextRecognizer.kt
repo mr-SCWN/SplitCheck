@@ -34,7 +34,7 @@ object ReceiptTextRecognizer {
             val priceMatch = priceRegex.find(line)
 
             if (priceMatch == null) {
-                buffer = line 
+                buffer = line
                 continue
             }
 
