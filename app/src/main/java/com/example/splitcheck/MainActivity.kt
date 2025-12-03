@@ -10,6 +10,8 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import com.example.splitcheck.ui.HomeScreen
 import com.example.splitcheck.ui.PhotoPreviewScreen
+import com.example.splitcheck.ui.ProductListScreen
+
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,7 +37,22 @@ fun AppNavigation() {
             arguments = listOf(navArgument("uri") { type = NavType.StringType })
         ) { entry ->
             val uri = entry.arguments?.getString("uri")
-            PhotoPreviewScreen(uri)
+            PhotoPreviewScreen(uri, navController)
         }
+
+        composable(
+            route = "products?text={text}&people={people}",
+            arguments = listOf(
+                navArgument("text") { type = NavType.StringType },
+                navArgument("people") { type = NavType.IntType }
+            )
+        ) { entry ->
+            val text = entry.arguments?.getString("text") ?: ""
+            val people = entry.arguments?.getInt("people") ?: 1
+            ProductListScreen(text, people)
+        }
+
+
+
     }
 }

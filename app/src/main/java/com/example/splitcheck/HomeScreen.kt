@@ -84,7 +84,7 @@ fun HomeScreen(navController: NavController) {
     }
 }
 
-// Функция создания файла
+// create file
 fun createTempImageUri(context: android.content.Context): Uri {
     val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
     file.createNewFile()
