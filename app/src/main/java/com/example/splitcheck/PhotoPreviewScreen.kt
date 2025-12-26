@@ -20,14 +20,14 @@ import kotlinx.coroutines.launch
 fun PhotoPreviewScreen(uri: String?, navController: NavController) {
 
     val context = LocalContext.current
-    val coroutine = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
 
     var peopleCount by remember { mutableStateOf(1) }
-    var ocrText by remember { mutableStateOf("") }
+
+    var extractedText by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
 
-    // State for edit dialog
-    var showEditDialog by remember { mutableStateOf(false) }
+    var showEdit by remember { mutableStateOf(false) }
     var editableText by remember { mutableStateOf("") }
 
     LazyColumn(
@@ -39,7 +39,7 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
 
         item {
             Text("Receipt Preview", style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
         item {
@@ -49,118 +49,107 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(300.dp),
+                        .height(320.dp),
                     contentScale = ContentScale.Fit
                 )
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
         }
 
-        // Scan button
         item {
-            Button(onClick = {
-                if (uri != null) {
+            Button(
+                onClick = {
+                    if (uri == null) return@Button
                     loading = true
-                    coroutine.launch {
-                        ocrText = ReceiptTextRecognizer.recognizeTextFromUri(context, Uri.parse(uri))
-                        editableText = ocrText
+                    scope.launch {
+                        val result = ReceiptTextRecognizer.recognizeReceiptFromUri(
+                            context = context,
+                            uri = Uri.parse(uri)
+                        )
+                        // ВАЖНО: берём "строки по рядам" — там левый+правый столбец склеены
+                        extractedText = result.rowLines.joinToString("\n")
+                        editableText = extractedText
                         loading = false
                     }
                 }
-            }) { Text("Scan Receipt") }
+            ) { Text("Scan Receipt") }
         }
 
         if (loading) {
-            item { Text("Processing…") }
-        }
-
-        // EDIT TEXT button
-        if (ocrText.isNotBlank()) {
             item {
-                Spacer(Modifier.height(15.dp))
-
-                Button(onClick = {
-                    editableText = ocrText
-                    showEditDialog = true
-                }) {
-                    Text("Edit text")
-                }
-
                 Spacer(Modifier.height(10.dp))
-
-                Text("Extracted text:", style = MaterialTheme.typography.titleMedium)
-                Text(ocrText)
+                Text("Processing…")
             }
         }
 
-        item { Spacer(Modifier.height(25.dp)) }
+        if (extractedText.isNotBlank()) {
+            item {
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { showEdit = true }) { Text("Edit text") }
 
-        // People selector
+                Spacer(Modifier.height(12.dp))
+                Text("Extracted text:", style = MaterialTheme.typography.titleMedium)
+
+                // Чтобы текст не "ломал" скролл — он внутри LazyColumn как item
+                Text(extractedText)
+            }
+        }
+
+        item { Spacer(Modifier.height(24.dp)) }
+
         item {
             Text("How many people?", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-
-                Button(onClick = { if (peopleCount > 1) peopleCount-- }) {
-                    Text("-")
-                }
-
+                Button(onClick = { if (peopleCount > 1) peopleCount-- }) { Text("-") }
                 Text(
                     peopleCount.toString(),
-                    modifier = Modifier.padding(20.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp),
                     style = MaterialTheme.typography.headlineMedium
                 )
-
-                Button(onClick = { peopleCount++ }) {
-                    Text("+")
-                }
+                Button(onClick = { peopleCount++ }) { Text("+") }
             }
         }
 
         item { Spacer(Modifier.height(20.dp)) }
 
         item {
-            Button(onClick = {
-                if (uri != null) {
-                    navController.navigate(
-                        "products?uri=${Uri.encode(uri)}&people=$peopleCount"
+            Button(
+                enabled = editableText.isNotBlank() && uri != null,
+                onClick = {
+                    // save extracted text
+                    navController.currentBackStackEntry?.savedStateHandle?.set(
+                        "ocr_text",
+                        editableText
                     )
+                    navController.navigate("products?uri=${Uri.encode(uri!!)}&people=$peopleCount")
                 }
-            }) {
-                Text("Continue")
-            }
+            ) { Text("Continue") }
         }
     }
 
-    // EDIT TEXT DIALOG
-    if (showEditDialog) {
+    if (showEdit) {
         AlertDialog(
-            onDismissRequest = { showEditDialog = false },
+            onDismissRequest = { showEdit = false },
             title = { Text("Edit extracted text") },
-
             text = {
                 OutlinedTextField(
                     value = editableText,
                     onValueChange = { editableText = it },
-                    modifier = Modifier.fillMaxWidth().height(250.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(260.dp)
                 )
             },
-
             confirmButton = {
                 Button(onClick = {
-                    ocrText = editableText
-                    showEditDialog = false
-                }) {
-                    Text("Save")
-                }
+                    extractedText = editableText
+                    showEdit = false
+                }) { Text("Save") }
             },
-
             dismissButton = {
-                Button(onClick = {
-                    showEditDialog = false
-                }) {
-                    Text("Cancel")
-                }
+                Button(onClick = { showEdit = false }) { Text("Cancel") }
             }
         )
     }

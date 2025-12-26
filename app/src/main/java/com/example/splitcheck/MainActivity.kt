@@ -3,21 +3,25 @@ package com.example.splitcheck
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavType
-import androidx.navigation.compose.*
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.splitcheck.ui.HomeScreen
 import com.example.splitcheck.ui.PhotoPreviewScreen
 import com.example.splitcheck.ui.ProductListScreen
-
+import com.example.splitcheck.ui.SummaryScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            AppNavigation()
+            MaterialTheme {
+                AppNavigation()
+            }
         }
     }
 }
@@ -41,18 +45,19 @@ fun AppNavigation() {
         }
 
         composable(
-            route = "products?text={text}&people={people}",
+            route = "products?uri={uri}&people={people}",
             arguments = listOf(
-                navArgument("text") { type = NavType.StringType },
+                navArgument("uri") { type = NavType.StringType },
                 navArgument("people") { type = NavType.IntType }
             )
         ) { entry ->
-            val text = entry.arguments?.getString("text") ?: ""
+            val uri = entry.arguments?.getString("uri")
             val people = entry.arguments?.getInt("people") ?: 1
-            ProductListScreen(text, people)
+            ProductListScreen(uri = uri, people = people, navController = navController)
         }
 
-
-
+        composable("summary") {
+            SummaryScreen(navController = navController)
+        }
     }
 }
