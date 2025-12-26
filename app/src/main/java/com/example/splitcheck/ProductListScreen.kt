@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -21,7 +22,7 @@ fun ProductListScreen(
     people: Int,
     navController: NavController
 ) {
-    // take text from previous screen
+    // take extracted text
     val textFromPreview: String =
         navController.previousBackStackEntry?.savedStateHandle?.get<String>("ocr_text") ?: ""
 
@@ -32,8 +33,13 @@ fun ProductListScreen(
             .filter { it.isNotBlank() }
     }
 
-    val items: List<ReceiptItem> = remember(textLines) {
+    val initialItems: List<ReceiptItem> = remember(textLines) {
         ReceiptTextRecognizer.extractReceiptItemsFromTextLines(textLines)
+    }
+
+
+    val items = remember {
+        mutableStateListOf<ReceiptItem>().apply { addAll(initialItems) }
     }
 
     // people names
@@ -43,12 +49,24 @@ fun ProductListScreen(
         }
     }
 
-    // selections[itemIndex][personIndex] = true/false
-    val selections = remember(items, people) {
-        items.map {
-            mutableStateListOf<Boolean>().apply { repeat(people) { add(false) } }
+    // selections[itemIndex][personIndex]
+    val selections = remember {
+        mutableStateListOf<SnapshotStateList<Boolean>>()
+    }
+
+    LaunchedEffect(Unit) {
+        if (selections.isEmpty() && items.isNotEmpty()) {
+            items.forEach {
+                selections.add(
+                    mutableStateListOf<Boolean>().apply { repeat(people) { add(false) } }
+                )
+            }
         }
     }
+
+    // dialog to delete object
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var deleteIndex by remember { mutableStateOf(-1) }
 
     Column(
         modifier = Modifier
@@ -61,8 +79,8 @@ fun ProductListScreen(
 
         if (items.isEmpty()) {
             Text(
-                "Не удалось выделить товары и цены из текста.\n" +
-                        "Вернись назад и поправь текст вручную (Edit text), чтобы строки были типа:\n" +
+                "It's not possible to select products and prices (or everything was deleted).\n" +
+                        "Go back and correct the text manually (Edit text) so that the lines are like:\n" +
                         "1x T-Shirt 25.50"
             )
             Spacer(Modifier.height(12.dp))
@@ -93,6 +111,7 @@ fun ProductListScreen(
                 .fillMaxWidth()
                 .weight(1f)
         ) {
+
             itemsIndexed(items) { index, item ->
                 Card(
                     modifier = Modifier
@@ -100,7 +119,28 @@ fun ProductListScreen(
                         .padding(vertical = 6.dp)
                 ) {
                     Column(Modifier.padding(12.dp)) {
-                        Text(item.name, style = MaterialTheme.typography.titleMedium)
+
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                item.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    deleteIndex = index
+                                    showDeleteDialog = true
+                                }
+                            ) {
+                                Text("Delete")
+                            }
+                        }
+
                         Spacer(Modifier.height(4.dp))
                         Text("Qty: ${item.quantity}    Price: ${"%.2f".format(item.price)}")
 
@@ -113,14 +153,17 @@ fun ProductListScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             for (p in 0 until people) {
-                                val checked = selections[index][p]
+                                val checked = selections.getOrNull(index)?.getOrNull(p) ?: false
+
                                 Column(
                                     modifier = Modifier.padding(end = 14.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     Checkbox(
                                         checked = checked,
-                                        onCheckedChange = { selections[index][p] = it }
+                                        onCheckedChange = { v ->
+                                            selections.getOrNull(index)?.set(p, v)
+                                        }
                                     )
                                     Text(
                                         text = names[p].ifBlank { "P${p + 1}" },
@@ -157,7 +200,6 @@ fun ProductListScreen(
                     selected.forEach { p -> owed[p] += share }
                 }
 
-                // save data for SummaryScreen using savedStateHandle
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_names", ArrayList(cleanNames))
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_owed", ArrayList(owed.toList()))
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_total", total)
@@ -168,11 +210,37 @@ fun ProductListScreen(
             Text("Show summary")
         }
     }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete item?") },
+            text = {
+                val name = items.getOrNull(deleteIndex)?.name ?: ""
+                Text("Are you sure you want to delete \"$name\"?\nThis item will not be counted in the summary.")
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (deleteIndex in items.indices) {
+                        items.removeAt(deleteIndex)
+                        selections.removeAt(deleteIndex)    
+                    }
+                    showDeleteDialog = false
+                    deleteIndex = -1
+                }) { Text("Yes, delete") }
+            },
+            dismissButton = {
+                Button(onClick = {
+                    showDeleteDialog = false
+                    deleteIndex = -1
+                }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 @Composable
 fun SummaryScreen(navController: NavController) {
-    // Достаём результаты из предыдущего экрана (products)
     val prev = navController.previousBackStackEntry?.savedStateHandle
     val names = (prev?.get<ArrayList<String>>("summary_names") ?: arrayListOf())
     val owed = (prev?.get<ArrayList<Double>>("summary_owed") ?: arrayListOf())
@@ -192,7 +260,6 @@ fun SummaryScreen(navController: NavController) {
         Text("Total receipt: ${"%.2f".format(total)}")
         Spacer(Modifier.height(12.dp))
 
-        // Кто платил (опционально)
         Text("Who paid the bill? (optional)", style = MaterialTheme.typography.titleMedium)
         Spacer(Modifier.height(8.dp))
 
@@ -221,7 +288,7 @@ fun SummaryScreen(navController: NavController) {
         val balances = names.indices.map { i ->
             val owe = owed.getOrNull(i) ?: 0.0
             val paid = if (i == payerIndex) payerPaid else 0.0
-            owe - paid // >0: должен, <0: должен получить
+            owe - paid
         }
 
         for (i in names.indices) {
