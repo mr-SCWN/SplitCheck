@@ -8,15 +8,113 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.tasks.await
 import kotlin.math.abs
+import kotlin.math.max
 
-data class ParsedLine(
-    val text: String,
-    val box: Rect
+object ReceiptTextRecognizer {
+
+    /**
+     * Возвращаем:
+     * - rawLines: линии с bounding box (для отладки/улучшений)
+     * - rowLines: строки по "рядам": внутри ряда сортируем слева-направо и склеиваем => "name   price"
+     */
+    suspend fun recognizeReceiptFromUri(context: Context, uri: Uri): ReceiptOcrResult {
+        val image = InputImage.fromFilePath(context, uri)
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val result = recognizer.process(image).await()
+
+        val raw = mutableListOf<OcrLine>()
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                raw.add(
+                    OcrLine(
+                        text = line.text.trim(),
+                        box = line.boundingBox ?: Rect(0, 0, 0, 0)
+                    )
+                )
+            }
+        }
+
+        // Сортируем по Y
+        val sorted = raw.sortedBy { it.box.centerY() }
+
+        // Группируем в "ряды" по близости Y
+        val rows = mutableListOf<MutableList<OcrLine>>()
+        for (ln in sorted) {
+            val h = max(ln.box.height(), 1)
+            val threshold = max(12, (h * 0.65f).toInt()) // адаптивно
+            val placed = rows.lastOrNull()?.let { lastRow ->
+                val rowY = lastRow.map { it.box.centerY() }.average()
+                if (abs(ln.box.centerY() - rowY) <= threshold) {
+                    lastRow.add(ln); true
+                } else false
+            } ?: false
+
+            if (!placed) rows.add(mutableListOf(ln))
+        }
+
+        val rowLines = rows
+            .map { row ->
+                row.sortedBy { it.box.left }
+                    .joinToString("    ") { it.text }
+                    .replace(Regex("\\s{2,}"), "  ")
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+
+        return ReceiptOcrResult(rawLines = raw, rowLines = rowLines)
+    }
+
+    /**
+     * Из rowLines делаем список товаров.
+     * Ожидаемые строки обычно типа: "1x T-Shirt    $25.50" или "STEAK FRITES 34.00"
+     */
+    fun extractReceiptItemsFromTextLines(lines: List<String>): List<ReceiptItem> {
+
+        val ignoreWords = listOf(
+            "total", "subtotal", "tax", "cash", "change",
+            "thank", "card", "visa", "master", "amount", "receipt"
+        )
+
+        // qty optional, name, price at end
+        val pattern = Regex("""^\s*(?:(\d+)\s*[xX]\s*)?(.+?)\s+[$€£]?\s*(\d+[.,]\d{2})\s*$""")
+
+        val items = mutableListOf<ReceiptItem>()
+
+        for (raw in lines) {
+            val line = raw.trim()
+
+            // отфильтруем мусор
+            val lower = line.lowercase()
+            if (ignoreWords.any { lower.contains(it) }) continue
+
+            val m = pattern.find(line) ?: continue
+
+            val qty = m.groupValues[1].toIntOrNull() ?: 1
+            val name = m.groupValues[2]
+                .trim()
+                .trimEnd('$', '€', '£')
+                .trim()
+
+            val price = m.groupValues[3].replace(",", ".").toDoubleOrNull() ?: continue
+
+            if (name.length < 2) continue
+            if (price <= 0.0) continue // часто 0.00 = мусор/акции, можно убрать это правило если нужно
+
+            items.add(ReceiptItem(name = name, quantity = qty, price = price))
+        }
+
+        return items
+    }
+}
+
+data class ReceiptOcrResult(
+    val rawLines: List<OcrLine>,
+    val rowLines: List<String>
 )
 
-data class ReceiptScanResult(
-    val parsedLines: List<ParsedLine>,
-    val rowLines: List<String>
+data class OcrLine(
+    val text: String,
+    val box: Rect
 )
 
 data class ReceiptItem(
@@ -24,121 +122,3 @@ data class ReceiptItem(
     val quantity: Int,
     val price: Double
 )
-
-object ReceiptTextRecognizer {
-
-    /**
-     * main function:
-     * - recognize text
-     * - collect rows into "rows" (left+right) so that there is no "left column first, then right"
-     */
-    suspend fun recognizeReceiptFromUri(context: Context, uri: Uri): ReceiptScanResult {
-        val image = InputImage.fromFilePath(context, uri)
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-        val result = recognizer.process(image).await()
-
-        val lines = mutableListOf<ParsedLine>()
-        for (block in result.textBlocks) {
-            for (line in block.lines) {
-                val box = line.boundingBox ?: Rect(0, 0, 0, 0)
-                lines.add(ParsedLine(text = line.text, box = box))
-            }
-        }
-
-        val rowLines = buildRowLines(lines)
-
-        return ReceiptScanResult(
-            parsedLines = lines,
-            rowLines = rowLines
-        )
-    }
-
-    /**
-     * We glue the recognized lines into "receipt lines":
-     * - group by Y (approximately one line)
-     * - sort inside the line by X (left -> right)
-     * - glue through the spaces
-     */
-    private fun buildRowLines(lines: List<ParsedLine>): List<String> {
-        if (lines.isEmpty()) return emptyList()
-
-        val heights = lines.map { (it.box.bottom - it.box.top).coerceAtLeast(1) }
-        val avgH = heights.sorted()[heights.size / 2]
-        val threshold = (avgH * 0.7f).coerceAtLeast(12f)
-
-        data class Row(var centerY: Float, val parts: MutableList<ParsedLine>)
-
-        val sortedByY = lines.sortedBy { (it.box.top + it.box.bottom) / 2f }
-        val rows = mutableListOf<Row>()
-
-        for (l in sortedByY) {
-            val cy = (l.box.top + l.box.bottom) / 2f
-            val existing = rows.minByOrNull { abs(it.centerY - cy) }
-
-            if (existing != null && abs(existing.centerY - cy) <= threshold) {
-                existing.parts.add(l)
-                existing.centerY = (existing.centerY + cy) / 2f
-            } else {
-                rows.add(Row(centerY = cy, parts = mutableListOf(l)))
-            }
-        }
-
-        //  collect the text in each line: left -> right
-        return rows
-            .sortedBy { it.centerY }
-            .map { row ->
-                row.parts
-                    .sortedBy { it.box.left }
-                    .joinToString("   ") { it.text.trim() }
-                    .trim()
-            }
-            .filter { it.isNotBlank() }
-    }
-
-
-    fun extractReceiptItemsFromTextLines(lines: List<String>): List<ReceiptItem> {
-        val items = mutableListOf<ReceiptItem>()
-
-        val priceAtEnd = Regex("""(?:[$€₴₽]|PLN|USD|EUR)?\s*(\d+[\.,]\d{2})\s*$""", RegexOption.IGNORE_CASE)
-
-        val qtyPrefix = Regex("""^\s*(\d+)\s*[xX]\s*""")
-
-        val ignore = listOf(
-            "total", "subtotal", "tax", "change", "cash", "card", "thank", "approval",
-            "terminal", "receipt"
-        )
-
-        for (raw in lines) {
-            val line = raw.trim()
-            if (line.isBlank()) continue
-
-            val lower = line.lowercase()
-            if (ignore.any { lower.contains(it) }) continue
-
-            val pm = priceAtEnd.find(line) ?: continue
-            val price = pm.groupValues[1].replace(",", ".").toDoubleOrNull() ?: continue
-
-            val qm = qtyPrefix.find(line)
-            val quantity = qm?.groupValues?.get(1)?.toIntOrNull() ?: 1
-
-            var name = line
-                .replace(pm.value, "")
-                .replace(qtyPrefix, "")
-                .trim()
-
-            name = name.replace("$", "").replace("€", "").replace("₴", "").replace("₽", "").trim()
-
-            if (name.length < 2) continue
-
-            items.add(
-                ReceiptItem(
-                    name = name,
-                    quantity = quantity,
-                    price = price
-                )
-            )
-        }
-
-        return items
-    }
-}

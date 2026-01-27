@@ -14,6 +14,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.splitcheck.ml.ReceiptItem
 import com.example.splitcheck.ml.ReceiptTextRecognizer
+import com.example.splitcheck.sync.NearbyManager
+import com.example.splitcheck.sync.SyncState
+import com.example.splitcheck.util.JsonUtil
 import java.util.ArrayList
 
 @Composable
@@ -22,7 +25,6 @@ fun ProductListScreen(
     people: Int,
     navController: NavController
 ) {
-    // take extracted text
     val textFromPreview: String =
         navController.previousBackStackEntry?.savedStateHandle?.get<String>("ocr_text") ?: ""
 
@@ -37,19 +39,16 @@ fun ProductListScreen(
         ReceiptTextRecognizer.extractReceiptItemsFromTextLines(textLines)
     }
 
-
     val items = remember {
         mutableStateListOf<ReceiptItem>().apply { addAll(initialItems) }
     }
 
-    // people names
     val names = remember(people) {
         mutableStateListOf<String>().apply {
             repeat(people) { add("Person ${it + 1}") }
         }
     }
 
-    // selections[itemIndex][personIndex]
     val selections = remember {
         mutableStateListOf<SnapshotStateList<Boolean>>()
     }
@@ -64,9 +63,43 @@ fun ProductListScreen(
         }
     }
 
-    // dialog to delete object
+    // delete dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteIndex by remember { mutableStateOf(-1) }
+
+    // ---- Nearby sync: apply incoming state ----
+    LaunchedEffect(Unit) {
+        NearbyManager.syncFlow.collect { st ->
+            // применяем только если people совпадает
+            if (st.people != people) return@collect
+
+            // names
+            for (i in 0 until people) {
+                if (i < names.size && i < st.names.size) names[i] = st.names[i]
+            }
+
+            // items
+            items.clear()
+            items.addAll(st.items)
+
+            // selections
+            selections.clear()
+            st.selections.forEach { row ->
+                selections.add(mutableStateListOf<Boolean>().apply { addAll(row) })
+            }
+        }
+    }
+
+    fun sendSync() {
+        if (!NearbyManager.isConnected()) return
+        val state = SyncState(
+            people = people,
+            names = names.toList(),
+            items = items.toList(),
+            selections = selections.map { it.toList() }
+        )
+        NearbyManager.sendSync(state)
+    }
 
     Column(
         modifier = Modifier
@@ -74,13 +107,22 @@ fun ProductListScreen(
             .padding(16.dp)
     ) {
 
-        Text("Products & who bought", style = MaterialTheme.typography.headlineMedium)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Products & who bought", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+            if (NearbyManager.isConnected()) {
+                Text("Connected", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
         Spacer(Modifier.height(12.dp))
 
         if (items.isEmpty()) {
             Text(
-                "It's not possible to select products and prices (or everything was deleted).\n" +
-                        "Go back and correct the text manually (Edit text) so that the lines are like:\n" +
+                "Не удалось выделить товары/цены.\n" +
+                        "Вернись назад и исправь текст вручную (Edit text), чтобы строки были типа:\n" +
                         "1x T-Shirt 25.50"
             )
             Spacer(Modifier.height(12.dp))
@@ -94,7 +136,10 @@ fun ProductListScreen(
         for (i in 0 until people) {
             OutlinedTextField(
                 value = names[i],
-                onValueChange = { names[i] = it },
+                onValueChange = {
+                    names[i] = it
+                    sendSync()
+                },
                 label = { Text("Person ${i + 1} name") },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -120,7 +165,6 @@ fun ProductListScreen(
                 ) {
                     Column(Modifier.padding(12.dp)) {
 
-
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -136,9 +180,7 @@ fun ProductListScreen(
                                     deleteIndex = index
                                     showDeleteDialog = true
                                 }
-                            ) {
-                                Text("Delete")
-                            }
+                            ) { Text("Delete") }
                         }
 
                         Spacer(Modifier.height(4.dp))
@@ -163,6 +205,7 @@ fun ProductListScreen(
                                         checked = checked,
                                         onCheckedChange = { v ->
                                             selections.getOrNull(index)?.set(p, v)
+                                            sendSync()
                                         }
                                     )
                                     Text(
@@ -200,15 +243,24 @@ fun ProductListScreen(
                     selected.forEach { p -> owed[p] += share }
                 }
 
+                // в Summary передаём всё, чтобы сохранить в историю
+                navController.currentBackStackEntry?.savedStateHandle?.set("session_uri", uri ?: "")
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_names", ArrayList(cleanNames))
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_owed", ArrayList(owed.toList()))
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_total", total)
 
+                navController.currentBackStackEntry?.savedStateHandle?.set(
+                    "session_items_json",
+                    JsonUtil.gson.toJson(items.toList())
+                )
+                navController.currentBackStackEntry?.savedStateHandle?.set(
+                    "session_selections_json",
+                    JsonUtil.gson.toJson(selections.map { it.toList() })
+                )
+
                 navController.navigate("summary")
             }
-        ) {
-            Text("Show summary")
-        }
+        ) { Text("Show summary") }
     }
 
     if (showDeleteDialog) {
@@ -223,7 +275,8 @@ fun ProductListScreen(
                 Button(onClick = {
                     if (deleteIndex in items.indices) {
                         items.removeAt(deleteIndex)
-                        selections.removeAt(deleteIndex)    
+                        selections.removeAt(deleteIndex)
+                        sendSync()
                     }
                     showDeleteDialog = false
                     deleteIndex = -1
@@ -236,86 +289,5 @@ fun ProductListScreen(
                 }) { Text("Cancel") }
             }
         )
-    }
-}
-
-@Composable
-fun SummaryScreen(navController: NavController) {
-    val prev = navController.previousBackStackEntry?.savedStateHandle
-    val names = (prev?.get<ArrayList<String>>("summary_names") ?: arrayListOf())
-    val owed = (prev?.get<ArrayList<Double>>("summary_owed") ?: arrayListOf())
-    val total = (prev?.get<Double>("summary_total") ?: 0.0)
-
-    var payerIndex by remember { mutableStateOf(0) }
-    var payerMenu by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Text("Summary", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(12.dp))
-
-        Text("Total receipt: ${"%.2f".format(total)}")
-        Spacer(Modifier.height(12.dp))
-
-        Text("Who paid the bill? (optional)", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-
-        Box {
-            Button(onClick = { payerMenu = true }) {
-                Text(if (names.isNotEmpty()) names[payerIndex] else "Select payer")
-            }
-            DropdownMenu(expanded = payerMenu, onDismissRequest = { payerMenu = false }) {
-                names.forEachIndexed { i, n ->
-                    DropdownMenuItem(
-                        text = { Text(n) },
-                        onClick = {
-                            payerIndex = i
-                            payerMenu = false
-                        }
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Text("Each person owes:", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-
-        val payerPaid = total
-        val balances = names.indices.map { i ->
-            val owe = owed.getOrNull(i) ?: 0.0
-            val paid = if (i == payerIndex) payerPaid else 0.0
-            owe - paid
-        }
-
-        for (i in names.indices) {
-            val owe = owed.getOrNull(i) ?: 0.0
-            val bal = balances[i]
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp)
-            ) {
-                Column(Modifier.padding(12.dp)) {
-                    Text(names[i], style = MaterialTheme.typography.titleMedium)
-                    Text("Owes (by items): ${"%.2f".format(owe)}")
-                    if (i == payerIndex) {
-                        Text("Paid: ${"%.2f".format(payerPaid)}")
-                    }
-                    Text(
-                        text = if (bal > 0) "Should pay: ${"%.2f".format(bal)}"
-                        else "Should receive: ${"%.2f".format(-bal)}"
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = { navController.popBackStack() }) {
-            Text("Back")
-        }
     }
 }

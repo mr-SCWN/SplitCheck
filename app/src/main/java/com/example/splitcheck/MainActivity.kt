@@ -10,10 +10,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.example.splitcheck.ui.HomeScreen
-import com.example.splitcheck.ui.PhotoPreviewScreen
-import com.example.splitcheck.ui.ProductListScreen
-import com.example.splitcheck.ui.SummaryScreen
+import com.example.splitcheck.ui.*
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -32,8 +29,18 @@ fun AppNavigation() {
 
     NavHost(navController = navController, startDestination = "home") {
 
-        composable("home") {
-            HomeScreen(navController)
+        composable("home") { HomeScreen(navController) }
+
+        composable("connect") { ConnectScreen(navController) }
+
+        composable("history") { HistoryScreen(navController) }
+
+        composable(
+            route = "history_detail/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType })
+        ) { entry ->
+            val id = entry.arguments?.getString("id") ?: ""
+            HistoryDetailScreen(navController, id)
         }
 
         composable(
@@ -56,8 +63,6 @@ fun AppNavigation() {
             ProductListScreen(uri = uri, people = people, navController = navController)
         }
 
-        composable("summary") {
-            SummaryScreen(navController = navController)
-        }
+        composable("summary") { SummaryScreen(navController) }
     }
 }

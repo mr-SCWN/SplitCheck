@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -52,7 +53,6 @@ fun HomeScreen(navController: NavController) {
         }
     }
 
-    // UI
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -60,6 +60,24 @@ fun HomeScreen(navController: NavController) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+
+        OutlinedButton(
+            onClick = { navController.navigate("connect") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Connect to device")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = { navController.navigate("history") },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("History")
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
 
         Button(
             onClick = { cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA) },
@@ -79,7 +97,6 @@ fun HomeScreen(navController: NavController) {
     }
 }
 
-// create file
 fun createTempImageUri(context: android.content.Context): Uri {
     val file = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
     file.createNewFile()

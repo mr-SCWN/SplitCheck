@@ -66,7 +66,6 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
                             context = context,
                             uri = Uri.parse(uri)
                         )
-                        // ВАЖНО: берём "строки по рядам" — там левый+правый столбец склеены
                         extractedText = result.rowLines.joinToString("\n")
                         editableText = extractedText
                         loading = false
@@ -89,8 +88,6 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
 
                 Spacer(Modifier.height(12.dp))
                 Text("Extracted text:", style = MaterialTheme.typography.titleMedium)
-
-                // Чтобы текст не "ломал" скролл — он внутри LazyColumn как item
                 Text(extractedText)
             }
         }
@@ -118,11 +115,7 @@ fun PhotoPreviewScreen(uri: String?, navController: NavController) {
             Button(
                 enabled = editableText.isNotBlank() && uri != null,
                 onClick = {
-                    // save extracted text
-                    navController.currentBackStackEntry?.savedStateHandle?.set(
-                        "ocr_text",
-                        editableText
-                    )
+                    navController.currentBackStackEntry?.savedStateHandle?.set("ocr_text", editableText)
                     navController.navigate("products?uri=${Uri.encode(uri!!)}&people=$peopleCount")
                 }
             ) { Text("Continue") }

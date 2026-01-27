@@ -61,4 +61,7 @@ dependencies {
     implementation(libs.coil.compose)
     implementation("com.google.mlkit:text-recognition:16.0.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+    implementation("com.google.android.gms:play-services-nearby:18.5.0")
+    implementation("com.google.code.gson:gson:2.13.2")
+
 }
