@@ -33,10 +33,12 @@ fun AppNavigation() {
 
         composable("connect") { ConnectScreen(navController) }
 
-        composable("history") { HistoryScreen(navController) }
+        composable("history") {
+            HistoryScreen(navController)
+        }
 
         composable(
-            route = "history_detail/{id}",
+            route = "history_detail?id={id}",
             arguments = listOf(navArgument("id") { type = NavType.StringType })
         ) { entry ->
             val id = entry.arguments?.getString("id") ?: ""

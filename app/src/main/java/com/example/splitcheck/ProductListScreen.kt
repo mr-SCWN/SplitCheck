@@ -243,7 +243,6 @@ fun ProductListScreen(
                     selected.forEach { p -> owed[p] += share }
                 }
 
-                // в Summary передаём всё, чтобы сохранить в историю
                 navController.currentBackStackEntry?.savedStateHandle?.set("session_uri", uri ?: "")
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_names", ArrayList(cleanNames))
                 navController.currentBackStackEntry?.savedStateHandle?.set("summary_owed", ArrayList(owed.toList()))

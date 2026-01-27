@@ -12,11 +12,7 @@ import kotlin.math.max
 
 object ReceiptTextRecognizer {
 
-    /**
-     * Возвращаем:
-     * - rawLines: линии с bounding box (для отладки/улучшений)
-     * - rowLines: строки по "рядам": внутри ряда сортируем слева-направо и склеиваем => "name   price"
-     */
+
     suspend fun recognizeReceiptFromUri(context: Context, uri: Uri): ReceiptOcrResult {
         val image = InputImage.fromFilePath(context, uri)
         val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
@@ -34,10 +30,8 @@ object ReceiptTextRecognizer {
             }
         }
 
-        // Сортируем по Y
         val sorted = raw.sortedBy { it.box.centerY() }
 
-        // Группируем в "ряды" по близости Y
         val rows = mutableListOf<MutableList<OcrLine>>()
         for (ln in sorted) {
             val h = max(ln.box.height(), 1)
@@ -64,10 +58,7 @@ object ReceiptTextRecognizer {
         return ReceiptOcrResult(rawLines = raw, rowLines = rowLines)
     }
 
-    /**
-     * Из rowLines делаем список товаров.
-     * Ожидаемые строки обычно типа: "1x T-Shirt    $25.50" или "STEAK FRITES 34.00"
-     */
+
     fun extractReceiptItemsFromTextLines(lines: List<String>): List<ReceiptItem> {
 
         val ignoreWords = listOf(
@@ -83,7 +74,7 @@ object ReceiptTextRecognizer {
         for (raw in lines) {
             val line = raw.trim()
 
-            // отфильтруем мусор
+
             val lower = line.lowercase()
             if (ignoreWords.any { lower.contains(it) }) continue
 
@@ -98,7 +89,7 @@ object ReceiptTextRecognizer {
             val price = m.groupValues[3].replace(",", ".").toDoubleOrNull() ?: continue
 
             if (name.length < 2) continue
-            if (price <= 0.0) continue // часто 0.00 = мусор/акции, можно убрать это правило если нужно
+            if (price <= 0.0) continue
 
             items.add(ReceiptItem(name = name, quantity = qty, price = price))
         }
